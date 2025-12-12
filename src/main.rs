@@ -7,11 +7,18 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::get;
+use axum::routing::post;
+use axum::{Json, response::Json as ResponseJson};
 use serde::Deserialize;
+use serde::Serialize;
+use serde_json::json;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 use tokio_util::io::ReaderStream;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
@@ -19,6 +26,10 @@ use tower_http::services::ServeDir;
 #[derive(Clone)]
 struct AppState {
     input: String,
+    total_duration: String,
+    resolutoin: String,
+    start_time: Arc<RwLock<String>>,
+    conversion_sender: mpsc::UnboundedSender<String>,
 }
 
 #[tokio::main]
@@ -36,20 +47,29 @@ async fn main() -> Result<()> {
         duration, resolution
     );
 
-    let output = output_dir.to_string();
-    tokio::spawn(async move {
-        println!("Starting conversion...");
-        if let Err(e) = convert_to_dash(&input, &output, "0") {
-            eprintln!("Conversion failed: {}", e);
-        } else {
-            println!("Conversion complete!");
-        }
-    });
-
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let state = AppState {
         input: "/home/koushikk/Downloads/SHOWS/Friren/S01E01-The Journey's End [18D1CE8D].mkv"
             .to_string(),
+        total_duration: duration.to_string(),
+        resolutoin: resolution,
+        start_time: Arc::new(RwLock::new("0".to_string())),
+        conversion_sender: tx,
     };
+
+    let output = output_dir.to_string();
+    tokio::spawn(async move {
+        println!("Starting conversion...");
+        while let Some(new_start_time) = rx.recv().await {
+            if let Err(e) = convert_to_dash(&input, &output, &new_start_time) {
+                eprintln!("Conversion failed: {}", e);
+            } else {
+                println!("Conversion complete!");
+            }
+        }
+    });
+
+    state.conversion_sender.send("0".to_string()).unwrap();
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -59,6 +79,8 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .nest_service("/dash", ServeDir::new(output_dir))
         .route("/subs.vtt", get(send_sub))
+        .route("/stats", get(send_stats))
+        .route("/api/seek", post(receive_this_blud))
         .with_state(state)
         .layer(cors);
 
@@ -148,7 +170,7 @@ fn convert_to_dash(input: &str, output_dir: &str, duration: &str) -> Result<()> 
             "-tune",
             "zerolatency",
             "-crf",
-            "28",
+            "30",
             "-sn",
             "-keyint_min",
             "72",
@@ -183,6 +205,49 @@ fn convert_to_dash(input: &str, output_dir: &str, duration: &str) -> Result<()> 
 #[derive(Deserialize)]
 struct SubQuery {
     path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VideoInfo {
+    duration: String,
+    resolution: String,
+}
+
+#[derive(Deserialize)]
+struct FromRequest {
+    time: String,
+}
+
+async fn receive_this_blud(
+    State(state): State<AppState>,
+    Json(payload): Json<FromRequest>,
+) -> Json<serde_json::Value> {
+    println!("Received time {} ", payload.time);
+    {
+        let mut start_time = state.start_time.write().await;
+        *start_time = payload.time.clone();
+        println!("changed time")
+    }
+
+    if let Err(e) = state.conversion_sender.send(payload.time) {
+        println!("error sending new conversation {}", e);
+    }
+
+    Json(json!({"status": "Success"}))
+}
+
+async fn send_stats(State(state): State<AppState>) -> ResponseJson<VideoInfo> {
+    let duration = state.total_duration;
+    let resolution = state.resolutoin;
+    let video_info = VideoInfo {
+        duration: duration,
+        resolution: resolution,
+    };
+
+    //println!("duration of video from send stats {}", duration);
+    //duration
+
+    Json(video_info)
 }
 
 async fn send_sub(State(state): State<AppState>) -> impl IntoResponse {

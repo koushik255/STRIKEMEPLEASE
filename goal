@@ -25,4 +25,18 @@ i still need to do the thing i was talking about before
 --subtitles stil 
 
 also at some point make it so that it brings both audio tracks with it
- 
+
+
+
+ what does this function need to do ,
+need a buttton on the front end which tell the video to start encoding from a
+certain time
+--- that would require subtitles being moved aswell i would assume
+
+but for that to work i would first need to be able to see how long a video is
+even if it has not fully loaded yet
+
+so this endpoint needs to tell me how long a video is
+
+when i receive the new time from the frontend then i guess i would
+just start the streaming from their

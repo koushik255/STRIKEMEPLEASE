@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     let output = output_dir.to_string();
     tokio::spawn(async move {
         println!("Starting conversion...");
-        if let Err(e) = convert_to_dash(&input, &output, "300.0") {
+        if let Err(e) = convert_to_dash(&input, &output, "0") {
             eprintln!("Conversion failed: {}", e);
         } else {
             println!("Conversion complete!");
@@ -144,21 +144,23 @@ fn convert_to_dash(input: &str, output_dir: &str, duration: &str) -> Result<()> 
             "-pix_fmt",
             "yuv420p",
             "-preset",
-            "medium",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
             "-crf",
-            "23",
+            "28",
             "-sn",
             "-keyint_min",
-            "48",
+            "72",
             "-g",
-            "48",
+            "72",
             "-sc_threshold",
             "0",
             "-force_key_frames",
-            "expr:gte(t,n_forced*2)",
+            "expr:gte(t,n_forced*3)",
             //dash options
             "-seg_duration",
-            "4",
+            "6",
             "-use_template",
             "1",
             "-use_timeline",

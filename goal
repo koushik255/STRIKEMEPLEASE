@@ -3,3 +3,22 @@ figure out the scrolling
 
 lets get the scrolling through the video to work
 then improve everything else
+the problem is im not sending to the front end the frontend is just fetching from the
+server
+is it possible to make it start encoding from a certain time?
+
+since i can encode from any time i would need to
+on the front end get total time first then also have a box which can send requests to
+the backend and if i send a time which would work it just starts encoding from there
+problem= i would need to set the subtitles to that time aswell
+
+
+-- need to try activly updating the video
+-- the html would also need to be adjusted based on time
+so lets try just moving the html forward 5 min
+
+so when its full loaded the seek works
+ok wtf it just works now
+
+also at some point make it so that it brings both audio tracks with it
+ 

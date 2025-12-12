@@ -10,7 +10,6 @@ use axum::routing::get;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use tokio::fs::File;
 use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
@@ -31,11 +30,16 @@ async fn main() -> Result<()> {
 
     let input =
         "/home/koushikk/Downloads/SHOWS/Friren/S01E01-The Journey's End [18D1CE8D].mkv".to_string();
+    let (duration, resolution) = get_video_info(input.as_str())?;
+    println!(
+        "video duration {:.2}, seconds, Resoltuion :{}",
+        duration, resolution
+    );
 
     let output = output_dir.to_string();
     tokio::spawn(async move {
         println!("Starting conversion...");
-        if let Err(e) = convert_to_dash(&input, &output) {
+        if let Err(e) = convert_to_dash(&input, &output, "300.0") {
             eprintln!("Conversion failed: {}", e);
         } else {
             println!("Conversion complete!");
@@ -84,36 +88,6 @@ fn strip_sub_mkv(input: String, outpath: String) -> String {
     outpath
 }
 
-fn strip_sub_mkv___(input: String, output: String) -> String {
-    let tmp_srt = "/tmp/temp.srt";
-    println!("Extracting to temp SRT…");
-    println!("INPUT {}", input);
-
-    let step1 = Command::new("ffmpeg")
-        .args(["-y", "-i", &input, "-map", "0:4", "-c:s", "srt", tmp_srt])
-        .output()
-        .expect("failed ffmpeg step1");
-    if !step1.status.success() {
-        eprintln!("Step1 failed: {}", String::from_utf8_lossy(&step1.stderr));
-    }
-
-    println!("Converting temp SRT → VTT…");
-    let step2 = Command::new("ffmpeg")
-        .args(["-y", "-i", tmp_srt, "-c:s", "webvtt", &output])
-        .output()
-        .expect("failed ffmpeg step2");
-
-    if step2.status.success() {
-        println!("✅ Subtitle extraction successful: {output}");
-    } else {
-        eprintln!(
-            "❌ Conversion failed: {}",
-            String::from_utf8_lossy(&step2.stderr)
-        );
-    }
-    output
-}
-
 fn convert_to_hls(input: &str, output_dir: &str) -> Result<()> {
     let output_path = format!("{}/master.m3u8", output_dir);
     let status = Command::new("ffmpeg")
@@ -150,12 +124,15 @@ fn convert_to_hls(input: &str, output_dir: &str) -> Result<()> {
     Ok(())
 }
 
-fn convert_to_dash(input: &str, output_dir: &str) -> Result<()> {
+fn convert_to_dash(input: &str, output_dir: &str, duration: &str) -> Result<()> {
     std::fs::create_dir_all(output_dir)?;
     let output_path = format!("{}/manifest.mpd", output_dir);
 
+    let start_time = duration;
     let status = Command::new("ffmpeg")
         .args(&[
+            "-ss",
+            &start_time.to_string(),
             "-i",
             input,
             "-c:v",
@@ -171,12 +148,25 @@ fn convert_to_dash(input: &str, output_dir: &str) -> Result<()> {
             "-crf",
             "23",
             "-sn",
+            "-keyint_min",
+            "48",
+            "-g",
+            "48",
+            "-sc_threshold",
+            "0",
+            "-force_key_frames",
+            "expr:gte(t,n_forced*2)",
+            //dash options
             "-seg_duration",
             "4",
             "-use_template",
             "1",
             "-use_timeline",
             "1",
+            "-adaptation_sets",
+            "id=0,streams=v id=1,streams=a",
+            "-avoid_negative_ts",
+            "make_zero",
             "-f",
             "dash",
             &output_path,
@@ -230,6 +220,41 @@ async fn send_sub(State(state): State<AppState>) -> impl IntoResponse {
             (StatusCode::INTERNAL_SERVER_ERROR, "cannot open subtitle").into_response()
         }
     }
+}
+
+fn get_video_info(input: &str) -> Result<(f64, String)> {
+    let output = Command::new("ffprobe")
+        .args(&[
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            input,
+        ])
+        .output()?;
+
+    let info: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+
+    let duration: f64 = info["format"]["duration"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("No duration found"))?
+        .parse()?;
+
+    // geting dimension
+    let video_stream = info["streams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["codec_type"] == "video")
+        .ok_or_else(|| anyhow::anyhow!("No video stream found"))?;
+
+    let width = video_stream["width"].as_u64().unwrap_or(1920);
+    let height = video_stream["height"].as_u64().unwrap_or(1080);
+    let resolution = format!("{}x{}", width, height);
+
+    Ok((duration, resolution))
 }
 
 // problem it doesnt work when you skip around
